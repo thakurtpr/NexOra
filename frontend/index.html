@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus</title>
+
+    <!-- CHOOSE YOUR THEME: Change 'modern.css' to 'dark.css' or 'soft.css' -->
+    <link rel="stylesheet" href="modern.css">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1>Nexus</h1>
+        </header>
+
+        <!-- LOGIN / SIGNUP VIEW -->
+        <main id="loginForm" class="card">
+            <h3 class="card-title">Welcome</h3>
+            <p class="card-subtitle">Sign up or log in to continue</p>
+            <div class="form-group">
+                <input type="text" id="username" placeholder="Username" />
+            </div>
+            <div class="form-group">
+                <input type="password" id="password" placeholder="Password" />
+            </div>
+            <div class="button-group">
+                <button id="signupBtn" class="btn btn-secondary">Sign Up</button>
+                <button id="loginBtn" class="btn btn-primary">Log In</button>
+            </div>
+            <div id="authMsg" class="form-message"></div>
+        </main>
+
+        <!-- ROOM SELECTION VIEW -->
+        <main id="roomSection" class="card" style="display:none;">
+            <h3 class="card-title">Join a Room</h3>
+            <p class="card-subtitle">Create a new room or enter an existing Room ID.</p>
+            <div class="button-group-vertical">
+                <button id="createRoomBtn" class="btn btn-primary">Create New Room</button>
+            </div>
+            <div class="or-separator"><span>OR</span></div>
+            <div class="form-group">
+                <input type="text" id="joinRoomInput" placeholder="Enter Room ID" />
+            </div>
+            <div class="button-group">
+                <button id="joinRoomBtn" class="btn btn-secondary">Join Room</button>
+            </div>
+            <div id="roomMsg" class="form-message"></div>
+        </main>
+
+        <!-- CHAT & FILE SHARE VIEW -->
+        <main id="chatSection" class="chat-view" style="display:none;">
+            <header class="chat-header">
+                <div>
+                    Room: <strong id="currentRoom"></strong>
+                </div>
+                <div id="status" class="status-indicator">Not connected</div>
+            </header>
+
+            <div id="messages" class="message-list"></div>
+
+            <div id="fileProgress" class="file-progress-container" style="display:none;">
+                <div class="progress-info-top">
+                    <div class="file-info" id="fileInfo"></div>
+                    <div class="file-info" id="progressText">0%</div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-info-bottom">
+                    <button id="cancelSendBtn" class="btn btn-danger btn-small">Cancel</button>
+                </div>
+            </div>
+
+            <footer class="chat-composer">
+                <input type="text" id="msgInput" placeholder="Type a message..." disabled />
+                <label for="fileInput" class="file-input-label btn">📎</label>
+                <input type="file" id="fileInput" multiple disabled style="display: none;" />
+                <button id="sendMsgBtn" class="btn btn-primary" disabled>Send</button>
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        const backendBase = "http://localhost:8080"; // Adjust if backend at different URL
+
+        // DOM elements
+        const loginForm = document.getElementById("loginForm");
+        const usernameInput = document.getElementById("username");
+        const passwordInput = document.getElementById("password");
+        const signupBtn = document.getElementById("signupBtn");
+        const loginBtn = document.getElementById("loginBtn");
+        const authMsg = document.getElementById("authMsg");
+
+        const roomSection = document.getElementById("roomSection");
+        const createRoomBtn = document.getElementById("createRoomBtn");
+        const joinRoomInput = document.getElementById("joinRoomInput");
+        const joinRoomBtn = document.getElementById("joinRoomBtn");
+        const roomMsg = document.getElementById("roomMsg");
+
+        const chatSection = document.getElementById("chatSection");
+        const currentRoomSpan = document.getElementById("currentRoom");
+        const statusEl = document.getElementById("status");
+        const messagesEl = document.getElementById("messages");
+        const msgInput = document.getElementById("msgInput");
+        const sendMsgBtn = document.getElementById("sendMsgBtn");
+        const fileInput = document.getElementById("fileInput");
+        const fileProgress = document.getElementById("fileProgress");
+        const fileInfo = document.getElementById("fileInfo");
+        const progressFill = document.getElementById("progressFill");
+        const progressText = document.getElementById("progressText");
+        const cancelSendBtn = document.getElementById("cancelSendBtn");
+
+        // State variables
+        let ws, pc, dc;
+        let roomID = null;
+        let loggedInUser = null;
+
+        // File transfer state
+        const CHUNK_SIZE = 16384; // 16KB chunks
+        let fileTransfers = new Map(); // Track ongoing file transfers
+        // Queue for multiple file sends
+        let isSending = false;
+        let currentSendTransfer = { id: null, cancelled: false };
+
+        // ICE servers config
+        const configuration = {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+            iceCandidatePoolSize: 10
+        };
+
+        // Helper: log message in chat box
+        function logMessage(msg, isSystem = false) {
+            const div = document.createElement("div");
+            div.textContent = msg;
+
+            div.classList.add('message');
+            if (isSystem) {
+                div.classList.add('message-system');
+            } else if (msg.startsWith("You:")) {
+                div.classList.add('message-self');
+                div.textContent = msg.substring(4); // Remove "You: " prefix
+            } else {
+                div.classList.add('message-peer');
+                div.textContent = msg.substring(5); // Remove "Peer:" prefix
+            }
+
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        // Helper: create download link element
+        function createDownloadLink(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename || "received_file";
+            a.textContent = `Download: ${filename || "received_file"}`;
+            a.className = 'download-link';
+            a.onclick = () => {
+                setTimeout(() => URL.revokeObjectURL(url), 100);
+            };
+            return a;
+        }
+
+        function disableChatInputs() {
+            msgInput.disabled = true;
+            sendMsgBtn.disabled = true;
+            fileInput.disabled = true;
+        }
+
+        function enableChatInputs() {
+            msgInput.disabled = false;
+            sendMsgBtn.disabled = false;
+            fileInput.disabled = false;
+        }
+
+        // ==== AUTH ====
+        signupBtn.onclick = async () => {
+            authMsg.textContent = "";
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (!username || !password) {
+                authMsg.textContent = "Please enter username and password";
+                return;
+            }
+            try {
+                const res = await fetch(backendBase + "/signup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await res.json();
+                authMsg.classList.remove('success', 'error');
+                if (res.ok) {
+                    authMsg.classList.add('success');
+                    authMsg.textContent = "Signup successful! Please log in.";
+                } else {
+                    authMsg.classList.add('error');
+                    authMsg.textContent = data.error || "Signup failed";
+                }
+            } catch (err) {
+                authMsg.classList.add('error');
+                authMsg.textContent = "Error connecting to server";
+            }
+        };
+
+        loginBtn.onclick = async () => {
+            authMsg.textContent = "";
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (!username || !password) {
+                authMsg.textContent = "Please enter username and password";
+                return;
+            }
+            try {
+                const res = await fetch(backendBase + "/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    loggedInUser = username;
+                    loginForm.style.display = "none";
+                    roomSection.style.display = "block";
+                } else {
+                    authMsg.classList.remove('success', 'error');
+                    authMsg.classList.add('error');
+                    authMsg.textContent = data.error || "Login failed";
+                }
+            } catch (err) {
+                authMsg.classList.add('error');
+                authMsg.textContent = "Error connecting to server";
+            }
+        };
+
+        // ==== ROOM ====
+        createRoomBtn.onclick = async () => {
+            roomMsg.textContent = "";
+            try {
+                const res = await fetch(backendBase + "/create-room", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username: loggedInUser }),
+                });
+                const data = await res.json();
+                roomMsg.classList.remove('success', 'error');
+                if (res.ok && data.room_code) {
+                    roomID = data.room_code;
+                    roomMsg.classList.add('success');
+                    roomMsg.textContent = "Room created: " + roomID + ". Connecting...";
+                    startWebRTC();
+                } else {
+                    roomMsg.classList.add('error');
+                    roomMsg.textContent = data.error || "Failed to create room";
+                }
+            } catch (err) {
+                roomMsg.classList.add('error');
+                roomMsg.textContent = "Error connecting to server";
+            }
+        };
+
+        joinRoomBtn.onclick = async () => {
+            const joinID = joinRoomInput.value.trim();
+            if (!joinID) {
+                roomMsg.textContent = "Enter a room ID";
+                return;
+            }
+            try {
+                const res = await fetch(backendBase + "/join-room", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ room_code: joinID })
+                });
+
+                const data = await res.json();
+                roomMsg.classList.remove('success', 'error');
+                if (res.ok) {
+                    roomID = joinID;
+                    roomMsg.classList.add('success');
+                    roomMsg.textContent = "Joined room: " + roomID + ". Connecting...";
+                    startWebRTC();
+                } else {
+                    roomMsg.classList.add('error');
+                    roomMsg.textContent = data.error || "Failed to join room";
+                }
+            } catch (err) {
+                roomMsg.classList.add('error');
+                roomMsg.textContent = "Error connecting to server";
+            }
+        };
+
+        // ==== WEBRTC SETUP ====
+        function startWebRTC() {
+            peerAnnounced = false;
+            loginForm.style.display = "none";
+            roomSection.style.display = "none";
+            chatSection.style.display = "flex"; // Use flex for chat layout
+            currentRoomSpan.textContent = roomID;
+            messagesEl.innerHTML = "";
+            statusEl.textContent = "Connecting...";
+            statusEl.className = 'status-indicator connecting';
+
+            console.log(window.location.host)
+
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            console.log("ws");
+            ws.onopen = () => {
+                statusEl.textContent = "Joining Room...";
+                ws.send(JSON.stringify({ room_code: roomID }));
+                createPeerConnection();
+            };
+
+            ws.onmessage = async (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); }
+                catch { return; }
+
+                if (msg.type === "error") {
+                    alert("Error: " + msg.message);
+                    ws.close();
+                    statusEl.textContent = "Error";
+                    statusEl.className = 'status-indicator error';
+                    disableChatInputs();
+                    return;
+                }
+
+                if (msg.sdp) {
+                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    if (msg.sdp.type === "offer") {
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
+                        ws.send(JSON.stringify({ sdp: pc.localDescription }));
+                    }
+                } else if (msg.candidate) {
+                    try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }
+                    catch (e) { console.error("Error adding ICE candidate", e); }
+                }
+            };
+
+            ws.onerror = (e) => {
+                statusEl.textContent = "WebSocket Error";
+                statusEl.className = 'status-indicator error';
+                disableChatInputs();
+            };
+            ws.onclose = () => {
+                statusEl.textContent = "Disconnected";
+                statusEl.className = 'status-indicator disconnected';
+                disableChatInputs();
+            };
+        }
+
+        function createPeerConnection() {
+            pc = new RTCPeerConnection(configuration);
+            dc = pc.createDataChannel("chat", { ordered: true, maxRetransmits: 3 });
+            setupDataChannelHandlers(dc);
+
+            pc.ondatachannel = (event) => {
+                dc = event.channel;
+                setupDataChannelHandlers(dc);
+            };
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ candidate: event.candidate }));
+                }
+            };
+
+            pc.onconnectionstatechange = () => {
+                statusEl.textContent = pc.connectionState;
+                statusEl.className = `status-indicator ${pc.connectionState}`;
+                if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+                    disableChatInputs();
+                }
+            };
+
+            setTimeout(async () => {
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    ws.send(JSON.stringify({ sdp: pc.localDescription }));
+                } catch (e) {
+                    console.error("Error creating offer:", e);
+                }
+            }, 1000);
+        }
+
+        let peerUser = 'Peer';
+
+        function   setupDataChannelHandlers(channel) {
+            channel.onopen = () => {
+                enableChatInputs();
+                channel.send(JSON.stringify({ type: 'user_hello', username: loggedInUser }));
+                logMessage("[System] Chat is now live!", true);
+                dc = channel;
+            };
+
+            channel.onclose = () => {
+                disableChatInputs();
+                logMessage(`${peerUser} has left the chat.`, null, true);
+            };
+
+            channel.onerror = (error) => {
+                logMessage("[System] Data channel error: " + error.message, true);
+            };
+
+            channel.onmessage = (event) => {
+                if (typeof event.data === 'string' && event.data.startsWith('{')) {
+                    try {
+                        handleStructuredMessage(JSON.parse(event.data));
+                    } catch (e) {
+                        logMessage(event.data, peerUser);
+                    }
+                }
+            };
+        }
+        let sendQueue = [];
+        let peerAnnounced = false;
+        function handleStructuredMessage(data) {
+            switch (data.type) {
+                case "chat":
+                    logMessage(data.message, peerUser);
+                    break;
+
+                // ----- REPLACE THE OLD user_hello CASE WITH THIS -----
+                case "user_hello":
+                    // Only announce the peer the first time we receive their hello.
+                    if (!peerAnnounced) {
+                        peerUser = data.username;
+                        logMessage(`${peerUser} has joined the chat.`, null, true);
+                        peerAnnounced = true; // Set the flag so it doesn't run again.
+                    } else {
+                        // If we already know who they are, just update the name in case it changed.
+                        peerUser = data.username;
+                    }
+                    break;
+                // --------------------------------------------------------
+
+                case "file_start": handleFileStart(data); break;
+                case "file_chunk": handleFileChunk(data); break;
+                case "file_end": handleFileEnd(data); break;
+                case "file_cancel": handleFileCancel(data); break;
+                default: logMessage("Peer: " + JSON.stringify(data));
+            }
+        }
+
+        function handleFileStart(data) {
+            const { id, name, size, fileType } = data;
+            fileTransfers.set(id, { name, size, type: fileType, chunks: [], receivedSize: 0 });
+
+            const div = document.createElement("div");
+            // This is the important change: adding the ID to the top-level element
+            div.id = `transfer-${id}`;
+            div.className = 'message message-peer file-transfer';
+            div.innerHTML = `<div class="message-content"><div class="message-username">${peerUser} is sending a file:</div><div class="message-text"><strong>${name}</strong> (${formatFileSize(size)})<div class="download-progress" id="progress-${id}">Receiving...</div></div></div>`;
+
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function handleFileChunk(data) {
+            const transfer = fileTransfers.get(data.id);
+            if (!transfer) return;
+
+            const binaryString = atob(data.chunk);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            transfer.chunks[data.index] = bytes;
+            transfer.receivedSize += bytes.length;
+
+            const progress = Math.round((transfer.receivedSize / transfer.size) * 100);
+            const progressBar = document.getElementById(`progress-${data.id}`);
+            if (progressBar) progressBar.textContent = `${progress}%`;
+        }
+
+        // Helper to create a user avatar (the "face logo")
+        function createAvatar(username) {
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            // Use the first letter of the username for the avatar
+            avatar.textContent = username ? username.charAt(0).toUpperCase() : '?';
+            // Give it a consistent color based on the username
+            let hash = 0;
+            for (let i = 0; i < (username || '').length; i++) {
+                hash = username.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const color = `hsl(${hash % 360}, 50%, 45%)`;
+            avatar.style.backgroundColor = color;
+            return avatar;
+        }
+
+        // The new logMessage function
+        function logMessage(text, sender, isSystem = false) {
+            const messageWrapper = document.createElement('div');
+            messageWrapper.classList.add('message');
+
+            if (isSystem) {
+                // System messages are simple and centered
+                messageWrapper.classList.add('message-system');
+                messageWrapper.textContent = text;
+            } else {
+                // Create the structure for user messages
+                const avatar = createAvatar(sender);
+                const content = document.createElement('div');
+                content.className = 'message-content';
+
+                const usernameDiv = document.createElement('div');
+                usernameDiv.className = 'message-username';
+                usernameDiv.textContent = sender;
+
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text';
+                textDiv.textContent = text;
+
+                content.appendChild(usernameDiv);
+                content.appendChild(textDiv);
+
+                // Align message left or right based on the sender
+                if (sender === loggedInUser) {
+                    messageWrapper.classList.add('message-self');
+                    messageWrapper.appendChild(content);
+                    messageWrapper.appendChild(avatar);
+                } else {
+                    messageWrapper.classList.add('message-peer');
+                    messageWrapper.appendChild(avatar);
+                    messageWrapper.appendChild(content);
+                }
+            }
+            messagesEl.appendChild(messageWrapper);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function handleFileEnd(data) {
+            const transfer = fileTransfers.get(data.id);
+            if (!transfer) return;
+
+            const progressEl = document.getElementById(`progress-${data.id}`);
+            if (progressEl) progressEl.textContent = `Assembling...`;
+
+            try {
+                // Ensure all chunks are present before combining
+                for (let i = 0; i < Math.ceil(transfer.size / CHUNK_SIZE); i++) {
+                    if (!transfer.chunks[i]) {
+                        throw new Error(`Missing chunk ${i} for file ${transfer.name}`);
+                    }
+                }
+                const blob = new Blob(transfer.chunks, { type: transfer.type || 'application/octet-stream' });
+
+                if (blob.size !== transfer.size) {
+                    throw new Error(`Assembled file size mismatch. Expected ${transfer.size}, got ${blob.size}`);
+                }
+
+                const downloadLink = createDownloadLink(blob, transfer.name);
+                const messageDiv = document.createElement("div");
+                messageDiv.className = 'message message-peer';
+                messageDiv.appendChild(downloadLink);
+                messagesEl.appendChild(messageDiv);
+
+                if (progressEl) progressEl.parentElement.remove();
+            } catch (e) {
+                console.error("Error assembling file:", e);
+                logMessage(`[Error] Failed to assemble file ${transfer.name}: ${e.message}`, true);
+                if (progressEl) progressEl.parentElement.innerHTML += ` <span class="error-text">Failed!</span>`;
+            }
+            fileTransfers.delete(data.id);
+        }
+        cancelSendBtn.onclick = () => {
+            if (!currentSendTransfer.id) return;
+            currentSendTransfer.cancelled = true;
+        };
+
+        sendMsgBtn.onclick = () => {
+            const msg = msgInput.value.trim();
+            if (msg && dc && dc.readyState === "open") {
+                dc.send(JSON.stringify({ type: "chat", message: msg }));
+                logMessage(msg, loggedInUser);
+                msgInput.value = "";
+            }
+        };
+
+        msgInput.onkeypress = (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                sendMsgBtn.click();
+            }
+        };
+
+        fileInput.onchange = () => {
+            sendQueue.push(...Array.from(fileInput.files));
+            fileInput.value = "";
+            if (!isSending) sendNextFile();
+        };
+
+        async function sendNextFile() {
+            if (sendQueue.length === 0) {
+                isSending = false;
+                fileProgress.style.display = "none";
+                return;
+            }
+            if (isSending) return; // Prevent concurrent sends
+
+            isSending = true;
+            const file = sendQueue.shift();
+            const fileId = generateFileId();
+            // Set the state for the file we are currently sending
+            currentSendTransfer = { id: fileId, cancelled: false };
+
+            logMessage(`Starting to send file: ${file.name}`, null, true);
+            fileProgress.style.display = "block";
+            fileInfo.textContent = `Sending: ${file.name}`;
+            dc.send(JSON.stringify({ type: "file_start", id: fileId, name: file.name, size: file.size, fileType: file.type }));
+
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            for (let i = 0; i < totalChunks; i++) {
+                // *** THE CORE CANCELLATION CHECK ***
+                if (currentSendTransfer.cancelled) {
+                    // 1. Notify the peer
+                    dc.send(JSON.stringify({ type: 'file_cancel', id: currentSendTransfer.id }));
+                    // 2. Log it locally
+                    logMessage(`You cancelled the file transfer: ${file.name}`, null, true);
+                    // 3. Stop the process
+                    break;
+                }
+
+                const start = i * CHUNK_SIZE;
+                const chunk = file.slice(start, start + CHUNK_SIZE);
+                const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(await chunk.arrayBuffer())));
+                dc.send(JSON.stringify({ type: "file_chunk", id: fileId, chunk: base64, index: i }));
+
+                const progress = ((i + 1) / totalChunks) * 100;
+                progressFill.style.width = `${progress}%`;
+                progressText.textContent = `${Math.round(progress)}%`;
+
+                // Pace the sending to not overwhelm the buffer
+                if (dc.bufferedAmount > CHUNK_SIZE * 16) {
+                    await new Promise(r => setTimeout(r, 50));
+                }
+            }
+
+            // Only send the "end" message if the transfer was NOT cancelled
+            if (!currentSendTransfer.cancelled) {
+                dc.send(JSON.stringify({ type: "file_end", id: fileId }));
+                logMessage(`Finished sending: ${file.name}`, null, true);
+            }
+
+            // Reset state and check for the next file in the queue
+            isSending = false;
+            currentSendTransfer = { id: null, cancelled: false };
+            setTimeout(sendNextFile, 100);
+        }
+
+        function handleFileCancel(data) {
+            const transferEl = document.getElementById(`transfer-${data.id}`);
+            if (transferEl) {
+                transferEl.remove();
+            }
+            fileTransfers.delete(data.id);
+        }
+
+        function generateFileId() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+    </script>
+</body>
+
+</html>
