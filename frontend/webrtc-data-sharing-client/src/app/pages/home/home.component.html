@@ -1,0 +1,13 @@
+<div class="home-container">
+  <h1>WebRTC Share</h1>
+  <p>Enter a room name to join or create a new room.</p>
+  <div class="join-form">
+    <input
+      type="text"
+      [(ngModel)]="roomId"
+      placeholder="Enter Room Name"
+      (keyup.enter)="joinRoom()"
+    >
+    <button (click)="joinRoom()">Join Room</button>
+  </div>
+</div>

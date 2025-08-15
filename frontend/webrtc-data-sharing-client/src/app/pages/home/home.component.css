@@ -1,0 +1,37 @@
+:host {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f2f5;
+}
+.home-container {
+  text-align: center;
+  padding: 40px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.join-form {
+  display: flex;
+  margin-top: 20px;
+}
+input {
+  padding: 10px;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px 0 0 4px;
+  flex-grow: 1;
+}
+button {
+  padding: 10px 20px;
+  font-size: 1rem;
+  border: none;
+  background-color: #008069;
+  color: white;
+  cursor: pointer;
+  border-radius: 0 4px 4px 0;
+}
+button:hover {
+  background-color: #007050;
+}

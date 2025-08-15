@@ -1,0 +1,45 @@
+<div class="room-container">
+  <div class="header">
+    <h1>Room: {{ roomId }}</h1>
+    <a routerLink="/">Leave Room</a>
+  </div>
+  <p class="status-bar">
+    <strong>Status:</strong> <span class="status">{{ connectionStatus }}</span>
+  </p>
+  <div class="main-content">
+    <div class="chat-panel">
+      <div class="messages-container" #messageContainer>
+        <div class="messages">
+          <div *ngIf="chatMessages.length === 0 && isConnected" class="placeholder">
+            Chat history is empty. Say hello!
+          </div>
+          <div *ngFor="let msg of chatMessages" class="message-bubble"
+               [ngClass]="{'my-message': msg.sender === 'me', 'peer-message': msg.sender === 'peer'}">
+            {{ msg.text }}
+          </div>
+        </div>
+      </div>
+      <div class="send-container" *ngIf="isConnected">
+        <input type="text" [(ngModel)]="messageToSend" (keyup.enter)="sendMessage()" placeholder="Type a message...">
+        <button (click)="sendMessage()">Send</button>
+      </div>
+    </div>
+    <div class="side-panel">
+      <h3>Actions</h3>
+      <button class="action-btn" (click)="startCall()" [disabled]="isConnected">Start Call</button>
+      <hr>
+      <h3>File Sharing</h3>
+      <div class="send-file-container">
+        <input type="file" (change)="onFileSelected($event)" #fileInput [disabled]="!isConnected">
+      </div>
+      <h4>Received Files:</h4>
+      <div class="files-list">
+        <div *ngFor="let file of receivedFiles" class="received-file">
+          <span>{{ file.name }}</span>
+          <a [href]="file.url" [download]="file.name">Download</a>
+        </div>
+        <p *ngIf="receivedFiles.length === 0" class="no-files">No files yet.</p>
+      </div>
+    </div>
+  </div>
+</div>
