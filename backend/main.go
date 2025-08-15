@@ -32,7 +32,9 @@ func main() {
 		AllowOrigins: "*", // Allows all origins
 		AllowHeaders: "Origin, Content-Type, Accept",
 	}))
-
+	app.Get("/HbtChk", func(c *fiber.Ctx) error {
+		return c.SendString("Hello, I am the WebRTC signaling server!")
+	})
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			return c.Next()
