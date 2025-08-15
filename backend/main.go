@@ -33,6 +33,12 @@ func main() {
 		return fiber.ErrUpgradeRequired
 	})
 
+	app.Get("/HbtChk", func(c *fiber.Ctx) error {
+		// This endpoint is used to check if the server is running.
+		return c.SendString("Server is running")
+	})
+
+
 	app.Get("/ws/:roomID", websocket.New(func(c *websocket.Conn) {
 		roomID := c.Params("roomID")
 		
