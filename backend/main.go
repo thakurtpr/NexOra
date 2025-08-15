@@ -1,9 +1,8 @@
-// ** VERIFIED FINAL main.go **
-
 package main
 
 import (
 	"log"
+	"os" // Import the 'os' package to read environment variables
 	"sync"
 
 	"github.com/gofiber/fiber/v2"
@@ -33,16 +32,10 @@ func main() {
 		return fiber.ErrUpgradeRequired
 	})
 
-	app.Get("/HbtChk", func(c *fiber.Ctx) error {
-		// This endpoint is used to check if the server is running.
-		return c.SendString("Server is running")
-	})
-
-
 	app.Get("/ws/:roomID", websocket.New(func(c *websocket.Conn) {
 		roomID := c.Params("roomID")
 		
-		// --- Client Registration ---
+		// Client Registration
 		hub.mu.Lock()
 		if _, ok := hub.rooms[roomID]; !ok {
 			hub.rooms[roomID] = make(map[*websocket.Conn]bool)
@@ -51,7 +44,7 @@ func main() {
 		log.Printf("Client connected to room '%s'. Total clients in room: %d", roomID, len(hub.rooms[roomID]))
 		hub.mu.Unlock()
 
-		// --- Defer Client Unregistration ---
+		// Defer Client Unregistration
 		defer func() {
 			hub.mu.Lock()
 			delete(hub.rooms[roomID], c)
@@ -64,16 +57,15 @@ func main() {
 			c.Close()
 		}()
 
-		// --- Message Loop ---
+		// Message Loop
 		for {
 			_, msg, err := c.ReadMessage()
 			if err != nil {
-				// This log is important to see why a client disconnects.
 				log.Printf("Error reading message from client in room '%s': %v", roomID, err)
 				break
 			}
 
-			// --- Broadcast Logic ---
+			// Broadcast Logic
 			hub.mu.Lock()
 			for client := range hub.rooms[roomID] {
 				if client != c {
@@ -85,7 +77,16 @@ func main() {
 			hub.mu.Unlock()
 		}
 	}))
+    
+    // --- THIS IS THE CRITICAL CHANGE ---
+    // Get the port from the environment variable
+    port := os.Getenv("PORT")
+    // Heroku and some other platforms expose port on this env var
+	if os.Getenv("GO_ENV") != "production" {
+		port = "3000"
+	}
 
-	log.Println("Starting server on port 3000")
-	log.Fatal(app.Listen(":3000"))
+    log.Printf("Starting server on port %s", port)
+	// Bind to the port assigned by Render
+    log.Fatal(app.Listen(":" + port))
 }
