@@ -1,26 +1,18 @@
 import { Injectable, NgZone } from '@angular/core';
 import { Subject } from 'rxjs';
 
-// --- Interfaces ---
-interface SignalingMessage {
-  type: 'offer' | 'answer' | 'ice-candidate' | 'file-meta';
-  data: any;
-}
+interface SignalingMessage { type: 'offer' | 'answer' | 'ice-candidate' | 'file-meta'; data: any; }
 interface FileMetadata { name: string; size: number; type: string; }
 const CHUNK_SIZE = 64 * 1024;
-
 
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
   private ws!: WebSocket;
   private peerConnection!: RTCPeerConnection;
   private dataChannel!: RTCDataChannel;
-
   private incomingFileInfo: FileMetadata | null = null;
   private receivedFileChunks: ArrayBuffer[] = [];
   private receivedBytes = 0;
-
-  // --- Observables for the component to subscribe to ---
   public receivedMessage$ = new Subject<any>();
   public receivedFile$ = new Subject<{ name: string; type: string; blob: Blob }>();
   public connectionState$ = new Subject<string>();
@@ -29,30 +21,15 @@ export class WebrtcService {
 
   public connect(roomId: string) {
     if (!roomId) { return; }
-
     this.connectionState$.next('Connecting...');
     this.ws = new WebSocket(`ws://localhost:3000/ws/${roomId}`);
-
-    // *** CRITICAL ERROR HANDLER ADDED HERE ***
     this.ws.onerror = (errorEvent) => {
         console.error('WebSocket connection error:', errorEvent);
         this.zone.run(() => this.connectionState$.next('Connection Failed!'));
     };
-
-    this.ws.onopen = () => {
-      this.zone.run(() => {
-        console.log('WebSocket connection opened.');
-        this.connectionState$.next('Connected! Waiting for another user...');
-      });
-    };
-
-    this.ws.onclose = () => {
-      this.zone.run(() => this.connectionState$.next('Disconnected from signaling server.'));
-    };
-
-    this.ws.onmessage = (event) => {
-      this.handleSignalingMessage(JSON.parse(event.data));
-    };
+    this.ws.onopen = () => this.zone.run(() => this.connectionState$.next('Connected! Waiting for another user...'));
+    this.ws.onclose = () => this.zone.run(() => this.connectionState$.next('Disconnected from signaling server.'));
+    this.ws.onmessage = (event) => this.handleSignalingMessage(JSON.parse(event.data));
   }
 
   public async startCall() {
@@ -90,6 +67,19 @@ export class WebrtcService {
     readSlice(0);
   }
 
+  public leaveRoom() {
+    console.log("Leaving room and cleaning up connections...");
+    if (this.peerConnection) {
+      this.peerConnection.close();
+    }
+    if (this.ws) {
+      this.ws.close();
+    }
+    this.receivedMessage$ = new Subject<any>();
+    this.receivedFile$ = new Subject<{ name: string; type: string; blob: Blob }>();
+    this.connectionState$ = new Subject<string>();
+  }
+
   private initializePeerConnection() {
     this.peerConnection = new RTCPeerConnection();
     this.peerConnection.onicecandidate = e => e.candidate && this.sendSignalingMessage('ice-candidate', e.candidate);
@@ -103,19 +93,14 @@ export class WebrtcService {
   private setupDataChannelEvents() {
     this.dataChannel.binaryType = 'arraybuffer';
     this.dataChannel.onopen = () => this.zone.run(() => this.connectionState$.next('Data Channel Open!'));
-    this.dataChannel.onmessage = (event) => {
-      this.zone.run(() => {
+    this.dataChannel.onmessage = (event) => this.zone.run(() => {
         if (typeof event.data === 'string') {
-          try {
-            this.receivedMessage$.next(JSON.parse(event.data));
-          } catch {
-            this.receivedMessage$.next({ text: event.data, sender: 'peer' }); // Fallback
-          }
+          try { this.receivedMessage$.next(JSON.parse(event.data)); } 
+          catch { this.receivedMessage$.next({ text: event.data, sender: 'peer' }); }
         } else {
           this.handleFileChunk(event.data);
         }
-      });
-    };
+    });
   }
 
   private handleFileChunk(chunk: ArrayBuffer) {
@@ -124,13 +109,11 @@ export class WebrtcService {
      this.receivedBytes += chunk.byteLength;
      if (this.receivedBytes === this.incomingFileInfo.size) {
        const fileBlob = new Blob(this.receivedFileChunks, { type: this.incomingFileInfo!.type });
-       this.zone.run(() => {
-          this.receivedFile$.next({
-             name: this.incomingFileInfo!.name,
-             type: this.incomingFileInfo!.type,
-             blob: fileBlob
-          });
-       });
+       this.zone.run(() => this.receivedFile$.next({
+           name: this.incomingFileInfo!.name,
+           type: this.incomingFileInfo!.type,
+           blob: fileBlob
+       }));
        this.incomingFileInfo = null;
        this.receivedFileChunks = [];
        this.receivedBytes = 0;
@@ -153,9 +136,7 @@ export class WebrtcService {
           await this.peerConnection.setRemoteDescription(new RTCSessionDescription(message.data));
           break;
         case 'ice-candidate':
-           if (this.peerConnection) {
-              await this.peerConnection.addIceCandidate(new RTCIceCandidate(message.data));
-           }
+           if (this.peerConnection) { await this.peerConnection.addIceCandidate(new RTCIceCandidate(message.data)); }
           break;
         case 'file-meta':
           this.incomingFileInfo = message.data as FileMetadata;

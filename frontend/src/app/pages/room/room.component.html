@@ -1,45 +1,56 @@
-<div class="room-container">
+<div class="chat-page-container">
   <div class="header">
     <h1>Room: {{ roomId }}</h1>
     <a routerLink="/">Leave Room</a>
   </div>
-  <p class="status-bar">
+
+  <div class="status-bar">
     <strong>Status:</strong> <span class="status">{{ connectionStatus }}</span>
-  </p>
-  <div class="main-content">
-    <div class="chat-panel">
-      <div class="messages-container" #messageContainer>
-        <div class="messages">
-          <div *ngIf="chatMessages.length === 0 && isConnected" class="placeholder">
-            Chat history is empty. Say hello!
-          </div>
-          <div *ngFor="let msg of chatMessages" class="message-bubble"
-               [ngClass]="{'my-message': msg.sender === 'me', 'peer-message': msg.sender === 'peer'}">
-            {{ msg.text }}
-          </div>
-        </div>
+  </div>
+
+  <div class="messages-container" #messageContainer>
+    <div class="messages">
+      <div *ngIf="!isConnected" class="placeholder">
+        <p>Join a room to securely chat and share files directly with a peer.</p>
+        <button class="action-btn" (click)="startCall()">Start Call</button>
       </div>
-      <div class="send-container" *ngIf="isConnected">
-        <input type="text" [(ngModel)]="messageToSend" (keyup.enter)="sendMessage()" placeholder="Type a message...">
-        <button (click)="sendMessage()">Send</button>
+      <div *ngIf="isConnected && chatMessages.length === 0" class="placeholder">
+        Connection established! Say hello or send a file.
+      </div>
+      <div *ngFor="let msg of chatMessages" class="message-bubble-wrapper" [ngClass]="{'sent': msg.sender === 'me', 'received': msg.sender === 'peer'}">
+        <div *ngIf="msg.type === 'text'" class="message-bubble">
+          {{ msg.text }}
+        </div>
+        <div *ngIf="msg.type === 'file'" class="message-bubble file-bubble">
+          <div class="file-icon">
+             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M11.83,16.08L10.75,15L8.5,17.25L7.25,16L6,17.25L8.5,19.75L11.83,16.08Z" /></svg>
+          </div>
+          <div class="file-details">
+            <span class="file-name">{{ msg.fileInfo?.name }}</span>
+            <span class="file-size">{{ msg.fileInfo?.size | number }} bytes</span>
+          </div>
+          <a *ngIf="msg.fileInfo?.url" [href]="msg.fileInfo?.url" [download]="msg.fileInfo?.name" class="download-btn">
+             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z" /></svg>
+          </a>
+        </div>
       </div>
     </div>
-    <div class="side-panel">
-      <h3>Actions</h3>
-      <button class="action-btn" (click)="startCall()" [disabled]="isConnected">Start Call</button>
-      <hr>
-      <h3>File Sharing</h3>
-      <div class="send-file-container">
-        <input type="file" (change)="onFileSelected($event)" #fileInput [disabled]="!isConnected">
-      </div>
-      <h4>Received Files:</h4>
-      <div class="files-list">
-        <div *ngFor="let file of receivedFiles" class="received-file">
-          <span>{{ file.name }}</span>
-          <a [href]="file.url" [download]="file.name">Download</a>
-        </div>
-        <p *ngIf="receivedFiles.length === 0" class="no-files">No files yet.</p>
-      </div>
+  </div>
+
+  <div class="composer-container" *ngIf="isConnected">
+    <div class="file-preview" *ngIf="selectedFile">
+      <span>{{ selectedFile.name }} ({{ selectedFile.size | number }} bytes)</span>
+      <button class="cancel-btn" (click)="cancelFileSelection()" title="Cancel file selection">&#x2715;</button>
+    </div>
+    <div class="composer">
+      <input type="file" #fileInput (change)="onFileSelected($event)" style="display: none;">
+      <button class="attach-btn" (click)="fileInput.click()" title="Attach file">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M16.5 6V17.5C16.5 20 14.5 22 12 22S7.5 20 7.5 17.5V5C7.5 3.62 8.62 2.5 10 2.5S12.5 3.62 12.5 5V15.5C12.5 16.33 11.83 17 11 17S9.5 16.33 9.5 15.5V6H8V15.5C8 17.16 9.34 18.5 11 18.5S14 17.16 14 15.5V5C14 2.79 12.21 1 10 1S6 2.79 6 5V17.5C6 20.84 8.66 23.5 12 23.5S18 20.84 18 17.5V6H16.5Z"></path></svg>
+      </button>
+      <input class="message-input" type="text" [(ngModel)]="messageToSend" (keyup.enter)="send()" placeholder="Type a message...">
+      <button class="send-btn" (click)="send()" title="Send">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M1.101 21.757 23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
+      </button>
     </div>
   </div>
 </div>
