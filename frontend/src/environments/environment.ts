@@ -1,4 +1,4 @@
 export const environment = {
   production: false,
-  wsUrl: 'ws://localhost:3000'
+  wsUrl: 'wss://nexora-f6q3.onrender.com'
 };

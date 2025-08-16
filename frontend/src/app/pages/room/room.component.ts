@@ -3,10 +3,19 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { WebrtcService } from '../../webrtc.service';
+import { WebrtcService } from '../../webrtc.service'; // Adjust path if needed
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 
-export interface ChatMessage { type: 'text' | 'file'; sender: 'me' | 'peer'; text?: string; fileInfo?: { name: string; size: number; url?: SafeUrl; }; }
+export interface ChatMessage {
+  type: 'text' | 'file';
+  sender: 'me' | 'peer';
+  text?: string;
+  fileInfo?: {
+    name: string;
+    size: number;
+    url?: SafeUrl;
+  };
+}
 
 @Component({
   selector: 'app-room',
@@ -18,6 +27,7 @@ export interface ChatMessage { type: 'text' | 'file'; sender: 'me' | 'peer'; tex
 export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   @ViewChild('messageContainer') private messageContainer!: ElementRef;
   @ViewChild('fileInput') private fileInput!: ElementRef;
+
   public roomId = '';
   public connectionStatus = 'Initializing...';
   public isConnected = false;
@@ -37,13 +47,25 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.roomId = params['roomId'];
         if (this.roomId) { this.webrtcService.connect(this.roomId); }
     });
+
     const messageSub = this.webrtcService.receivedMessage$.subscribe(msgObj => {
       this.chatMessages.push({ type: 'text', sender: 'peer', text: msgObj.text });
     });
+
+    // --- THIS IS THE CORRECTED SECTION ---
     const statusSub = this.webrtcService.connectionState$.subscribe(status => {
         this.connectionStatus = status;
-        this.isConnected = status === 'Data Channel Open!';
+
+        // Check for any status that confirms a successful peer connection.
+        const isNowConnected = status === 'Data Channel Open!' || status === 'Connected to Peer!' || status === 'Peer state: connected';
+        this.isConnected = isNowConnected;
+
+        // Ensure we reset the state if the connection is lost.
+        if (status.includes('Disconnected') || status.includes('Failed')) {
+          this.isConnected = false;
+        }
     });
+
     const fileSub = this.webrtcService.receivedFile$.subscribe(file => {
       this.chatMessages.push({
         type: 'file', sender: 'peer',
@@ -53,6 +75,7 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         }
       });
     });
+
     this.subscriptions.add(routeSub);
     this.subscriptions.add(messageSub);
     this.subscriptions.add(statusSub);
@@ -60,6 +83,7 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   ngAfterViewChecked(): void { this.scrollToBottom(); }
+
   startCall(): void { this.webrtcService.startCall(); }
 
   send(): void {
